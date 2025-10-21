@@ -311,6 +311,7 @@ void APPHMI_Tasks ( void )
                 {
                     startTemperatureReading();
                     apphmiData.state = APPHMI_STATE_WAIT_TEMPERATURE_READING;
+                    return; //Avoid the if below if it happens
                 }
                 else
                 {
@@ -852,7 +853,7 @@ void APPHMI_Tasks ( void )
         {
             if (IsEERAMMTaskIdle() && IsGLCDTaskIdle())
             {
-                LCDStr(0x02,(unsigned char *)"Parameters  have been updated!",false, true);
+                LCDStr(0x02,(unsigned char *)"Parameters    have been updated!",false, true);
                 apphmiData.adelay = RTC_Timer32CounterGet();
                 apphmiData.state = APPHMI_STATE_WAIT_UPDATED_PARAMETERS_MESSAGE ;
             }
