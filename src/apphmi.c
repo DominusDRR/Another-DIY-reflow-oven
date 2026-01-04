@@ -112,7 +112,7 @@ extern uint32_t abs_diff_uint32(uint32_t a, uint32_t b);
 extern uint8_t getPressedBtn(void);
 
 extern uint8_t getTypeThermocoupleError(void);
-extern float getThermocoupleTemp(void);
+extern float getThermocoupleAverageTemp (void);
 extern float getInternalTemp(void);
 extern bool IsMaxTaskIdle (void);
 extern void startTemperatureReading(void);
@@ -373,8 +373,11 @@ void APPHMI_Tasks ( void )
         }
         case APPHMI_STATE_GET_THERMOCUPLE_TEMPERATUE://Split into several states, so that the task does not completely take over the CPU
         {
-            apphmiData.thermocoupleTemp = getThermocoupleTemp();
-            apphmiData.state = APPHMI_STATE_GET_INTERNAL_TEMPERATUE;
+            if (IsMaxTaskIdle())
+            {
+                apphmiData.thermocoupleTemp = getThermocoupleAverageTemp();//getThermocoupleTemp();
+                apphmiData.state = APPHMI_STATE_GET_INTERNAL_TEMPERATUE;
+            }
             break;
         }
         case APPHMI_STATE_GET_INTERNAL_TEMPERATUE:
