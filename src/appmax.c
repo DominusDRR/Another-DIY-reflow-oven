@@ -73,6 +73,7 @@ float getThermocoupleTemp(void);
 float getInternalTemp(void);
 bool IsMaxTaskIdle (void);
 void startTemperatureReading(void);
+float getThermocoupleAverageTemp (void);
 /* TODO:  Add any necessary local functions.
 */
 static void SPI0Instance1EventHandler (DRV_SPI_TRANSFER_EVENT event, DRV_SPI_TRANSFER_HANDLE transferHandle, uintptr_t context)
@@ -138,7 +139,13 @@ bool IsMaxTaskIdle (void)
 }
 void startTemperatureReading(void)
 {
+    appmaxData.averagePointer = 0x00;
+    appmaxData.averageTemp = 0.0f;
     appmaxData.state = APPMAX_STATE_START_TEMPERATURE_READING;
+}
+float getThermocoupleAverageTemp (void)
+{
+    return appmaxData.averageTemp;
 }
 // *****************************************************************************
 // *****************************************************************************
@@ -240,8 +247,31 @@ void APPMAX_Tasks ( void )
                 {   
                     appmaxData.adelay = RTC_Timer32CounterGet();
                     appmaxData.typeThermocoupleError = decodeThermocoupleError(appmaxData.bufferRX[0x03]);
+                    appmaxData.state = APPMAX_GET_AVERAGE_TEMPERATURE;
+                }
+            }
+            break;
+        }
+        case APPMAX_GET_AVERAGE_TEMPERATURE:
+        {
+            if (NO_ERROR_THERMOCOUPLE == appmaxData.typeThermocoupleError)
+            {
+                appmaxData.averageTemp += getThermocoupleTemp();
+                appmaxData.averagePointer++;
+                if (appmaxData.averagePointer > 9)
+                {
+                    appmaxData.averageTemp = appmaxData.averageTemp/10.0f;
+                    appmaxData.averageTemp = 1.28111f*appmaxData.averageTemp - 4.7743f;
                     appmaxData.state = APPMAX_STATE_IDLE;
                 }
+                else
+                {
+                     appmaxData.state = APPMAX_STATE_START_TEMPERATURE_READING;
+                }
+            }
+            else
+            {
+                appmaxData.state = APPMAX_STATE_IDLE;
             }
             break;
         }
