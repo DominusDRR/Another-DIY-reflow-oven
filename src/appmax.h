@@ -72,7 +72,8 @@ typedef enum
     APPMAX_STATE_START_TEMPERATURE_READING,        
     APPMAX_START_TRANSMISSION,
     APPMAX_TRANSMISSION,
-    APPMAX_WAIT_FOR_RECEPTION_END,        
+    APPMAX_WAIT_FOR_RECEPTION_END, 
+    APPMAX_GET_AVERAGE_TEMPERATURE,        
     APPMAX_STATE_ERROR,
     APPMAX_STATE_DELAY_TO_REOPEN_SPI
 } APPMAX_STATES;
@@ -105,6 +106,8 @@ typedef struct
     bool isTransferComplete;
     uint32_t adelay;
     uint8_t typeThermocoupleError;
+    uint8_t averagePointer;
+    float averageTemp;
 } APPMAX_DATA;
 
 // *****************************************************************************
