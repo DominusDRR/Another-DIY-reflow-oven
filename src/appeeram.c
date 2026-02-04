@@ -201,6 +201,9 @@ uint16_t decreaseParameterTempTime(uint8_t index);
 void setParameter(uint8_t index, uint16_t value);
 bool IsEERAMMTaskIdle (void);
 void initializeWriteEERAM(void);
+float getKp(void);
+float getKi(void);
+float getKd(void);
 
 /* TODO:  Add any necessary local functions.
 */
@@ -294,17 +297,17 @@ bool verifyDataStoredInEERAM(void)
         return false;
     }
     memcpy(&appeeramData.Kp, &BufferReception[0x0C], sizeof(appeeramData.Kp)); //Kp
-    if (appeeramData.Kp < 0 || appeeramData.Kp > 1)
+    if (appeeramData.Kp < -1 || appeeramData.Kp > 1)
     {
         return false;
     }
     memcpy(&appeeramData.Ki, &BufferReception[0x10], sizeof(appeeramData.Ki)); //Ki    
-    if (appeeramData.Ki < 0 || appeeramData.Ki > 1)
+    if (appeeramData.Ki < -1 || appeeramData.Ki > 1)
     {
         return false;
     }
     memcpy(&appeeramData.Kd, &BufferReception[0x14], sizeof(appeeramData.Kd)); //Kd   
-     if (appeeramData.Kd < 0 || appeeramData.Kd > 1)
+     if (appeeramData.Kd < -1 || appeeramData.Kd > 1)
     {
         return false;
     }
@@ -551,6 +554,21 @@ bool IsEERAMMTaskIdle (void)
 void initializeWriteEERAM(void)
 {
     appeeramData.state = APPEERAM_STATE_INITIALIZE_CRC_WRITE;
+}
+
+float getKp(void)
+{
+    return appeeramData.Kp;
+}
+
+float getKi(void)
+{
+    return appeeramData.Ki;
+}
+
+float getKd(void)
+{
+    return appeeramData.Kd;
 }
 
 // *****************************************************************************
