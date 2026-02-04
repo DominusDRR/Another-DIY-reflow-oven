@@ -15,7 +15,7 @@ Pin Number,Pin ID,Custom Name,Function,Mode, Direction,Latch,Pull Up,Pull Down,D
 16,PA15,,Available,,,,,,NORMAL
 17,PA16,UP_F,GPIO,Digital,In,n/a,No,No,NORMAL
 18,PA17,ESC_F,GPIO,Digital,In,n/a,No,No,NORMAL
-19,PA18,,TC4_WO0,Digital,High Impedance,n/a,No,No,NORMAL
+19,PA18,SSR,GPIO,Digital,Out,Low,,,NORMAL
 20,PA19,LED,GPIO,Digital,Out,Low,,,NORMAL
 21,PA22,,TC0_WO0,Digital,Out,Low,,,NORMAL
 22,PA23,DOWN_F,GPIO,Digital,In,n/a,No,No,NORMAL
