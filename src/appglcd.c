@@ -325,6 +325,7 @@ void LCDStr(uint8_t row, const uint8_t *dataPtr, bool inv, bool updateLCD);
 void LCDChrXY_Scaled(uint8_t x, uint8_t y, const uint8_t *dataPtr, uint8_t scale, bool updateLCD);
 void drawInitialLogo(void);
 void SetPixel(uint8_t x, uint8_t y);
+void ClearPixel(uint8_t x, uint8_t y);
 void updateLCDOrIdleState(void);
 void LCDTinyStr(uint8_t x, uint8_t y, const char *dataPtr, bool updateLCD);
 /****************************************************************************/
@@ -1010,6 +1011,10 @@ void APPGLCD_Tasks ( void )
                         if (bits & (1 << appglcdData.bit))
                         {
                             SetPixel(appglcdData.pointerX1 + appglcdData.col, appglcdData.pointerY1 + appglcdData.bit);
+                        }
+                        else
+                        {
+                            ClearPixel(appglcdData.pointerX1 + appglcdData.col, appglcdData.pointerY1 + appglcdData.bit);
                         }
                         appglcdData.bit++;
                     }
