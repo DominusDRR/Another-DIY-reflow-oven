@@ -61,7 +61,7 @@ APPMAX_DATA appmaxData;
 /* TODO:  Add any necessary callback functions.
 */
 extern uint32_t abs_diff_uint32(uint32_t a, uint32_t b);
-
+//extern void buttonPressedSound(void);//fr3
 // *****************************************************************************
 // *****************************************************************************
 // Section: Application Local Functions
@@ -104,14 +104,29 @@ uint8_t getTypeThermocoupleError(void)
 
 float getThermocoupleTemp(void)
 {
-    int16_t raw14 = ((int16_t)appmaxData.bufferRX[0] << 8 | appmaxData.bufferRX[1]) >> 2;
-    // Si era negativo (bit13 = 1), extiende signo a 16 bits:
-    if (raw14 & (1 << 13))
-    {
-        raw14 |= 0xC000;  // 1100 0000 0000 0000
+//    int16_t raw14 = ((int16_t)appmaxData.bufferRX[0] << 8 | appmaxData.bufferRX[1]) >> 2;
+//    // Si era negativo (bit13 = 1), extiende signo a 16 bits:
+//    if (raw14 & (1 << 13))
+//    {
+//        raw14 |= 0xC000;  // 1100 0000 0000 0000
+//    }
+//    // Resolución 0.25 °C por LSB
+//    return raw14 * 0.25f;
+    // Construye los 16 bits superiores (bytes MSB primero)
+    uint16_t msb16 = ((uint16_t)appmaxData.bufferRX[0] << 8) | (uint16_t)appmaxData.bufferRX[1];
+
+    // Los 14 bits de temperatura están en msb16 >> 2
+    uint16_t raw14 = msb16 >> 2;
+
+    // Extiende el signo de 14 bits a 16 bits de forma explícita
+    if (raw14 & (1u << 13)) {
+        raw14 |= 0xC000u; // pone a 1 los dos MSB para formar el negativo en 16 bits
     }
-    // Resolución 0.25 °C por LSB
-    return raw14 * 0.25f;
+
+    int16_t signed14 = (int16_t)raw14;
+
+    // LSB = 0.25 °C
+    return (float)signed14 * 0.25f;
 }
 float getInternalTemp(void)
 {
@@ -256,7 +271,7 @@ void APPMAX_Tasks ( void )
         {
             if (NO_ERROR_THERMOCOUPLE == appmaxData.typeThermocoupleError)
             {
-                appmaxData.averageTemp += getThermocoupleTemp();
+                appmaxData.averageTemp +=  getThermocoupleTemp();
                 appmaxData.averagePointer++;
                 if (appmaxData.averagePointer > 9)
                 {
@@ -271,7 +286,8 @@ void APPMAX_Tasks ( void )
             }
             else
             {
-                appmaxData.state = APPMAX_STATE_IDLE;
+                //buttonPressedSound(); 
+                appmaxData.state = APPMAX_STATE_START_TEMPERATURE_READING;//APPMAX_STATE_IDLE;
             }
             break;
         }
