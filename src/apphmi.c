@@ -128,6 +128,12 @@ extern void setConstantsPID(uint8_t index, float constantPID);
 extern void upDatetEERAMvalues(void);
 extern bool IsEERAMMTaskIdle (void);
 extern void initializeWriteEERAM(void);
+extern bool IsPIDTaskIdle(void);
+extern void initializeTaskPID(void);
+extern float getLastMeasurement(void);
+//bool IsONFFTaskIdle(void);
+//void initializeTaskONOFF(void);
+//float getLastMeasurementONOFF(void);
 // *****************************************************************************
 // *****************************************************************************
 // Section: Application Local Functions
@@ -272,6 +278,10 @@ void APPHMI_Tasks ( void )
                         {
                             apphmiData.parametersBeenChanged = false;
                             goParametersMenu();
+                        }
+                        else if (0x02 == apphmiData.selectedOption)
+                        {
+                            apphmiData.state = APPHMI_STATE_WAIT_IDLE_TASK_PID;
                         }
                         break;
                     }
@@ -528,7 +538,7 @@ void APPHMI_Tasks ( void )
                 else
                 {
                     apphmiData.backupPIDConstant = returnConstantsPID(apphmiData.selectedOption);
-                    sprintf(apphmiData.bufferForStrings, "%.1f", apphmiData.backupPIDConstant);
+                    sprintf(apphmiData.bufferForStrings, "%.2f", apphmiData.backupPIDConstant);
                 }
                 LCDChrXY_Scaled(5,15,(uint8_t *)apphmiData.bufferForStrings,2,false);
                 apphmiData.state = APPHMI_STATE_UPDATE_LCD_VALUE_PARAMETER;
@@ -607,11 +617,11 @@ void APPHMI_Tasks ( void )
                 {
                     if (apphmiData.doNotClearLCD)
                     {
-                        sprintf(apphmiData.bufferForStrings, "%.1f", increaseConstantsPID(apphmiData.selectedOption));
+                        sprintf(apphmiData.bufferForStrings, "%.2f", increaseConstantsPID(apphmiData.selectedOption));
                     }
                     else
                     {
-                        sprintf(apphmiData.bufferForStrings, "%.1f", decreaseConstantsPID(apphmiData.selectedOption));
+                        sprintf(apphmiData.bufferForStrings, "%.2f", decreaseConstantsPID(apphmiData.selectedOption));
                     }
                 }
                 apphmiData.doNotClearLCD = false; //It is important that it remains false after using it.
@@ -867,6 +877,93 @@ void APPHMI_Tasks ( void )
             if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _2000ms)
             {
                 returnHomeMenu();
+            }
+            break;
+        }
+        /********* Proceso PID **************/
+        case APPHMI_STATE_WAIT_IDLE_TASK_PID:
+        {
+            if (IsPIDTaskIdle())//IsONFFTaskIdle())
+            {
+                apphmiData.messagePointer = 0x00; //I'm going to use messagePointer to do multiple things in a single state machine.
+                initializeTaskPID();
+                apphmiData.state = APPHMI_STATE_CLEAN_LCD_BEFORE_GRAPH_TEMPERATURE;
+            }
+            break;
+        }
+        case APPHMI_STATE_CLEAN_LCD_BEFORE_GRAPH_TEMPERATURE:
+        {
+            if (IsGLCDTaskIdle())
+            {
+                /***********************************/
+                /* Y coordinates 
+                   300ºC*m + cte = 0
+                   10ºC*m + cte = 47
+                   m = -47/290 cte= 1410/29   */
+                /**********************************/
+                switch (apphmiData.messagePointer)
+                {
+                    case 0x00:  LCDClear();             break;
+                    case 0x01:  LCDLine (0,0,0,47);     break;
+                    case 0x02:  LCDLine (0,47,83,47);   break;
+                    case 0x03:  
+                    {
+                        apphmiData.adelay = RTC_Timer32CounterGet(); //I'm going to graph the temperature every second
+                        //float measurement = getThermocoupleAverageTemp();
+                        apphmiData.x = 0; //x represents time.
+                        apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
+                        break;
+                    }
+                    case 0x04:
+                    {
+                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _2000ms)
+                        {
+                            uint32_t xPrevious = apphmiData.x;
+                            uint32_t yPrevious = apphmiData.y;
+                            apphmiData.x++;
+                            if (apphmiData.x < 83)
+                            {
+                                apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); 
+                                if (apphmiData.y > 47) //Avoid writing beyond 47
+                                {
+                                    apphmiData.y = 47;
+                                }
+                                LCDLine (xPrevious,yPrevious,apphmiData.x,apphmiData.y);
+                            }
+                            else
+                            {
+                                apphmiData.messagePointer = 0;
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            return; //So that it does not increment apphmiData.messagePointer
+                        }
+                        break;
+                    }
+                    default:
+                    {
+                        if (IsGLCDTaskIdle()) // I wait until the GLCD task is idle
+                        {
+                            apphmiData.adelay = RTC_Timer32CounterGet(); 
+                            float temp = getLastMeasurement();
+                            snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",temp);
+                            uint8_t cy = 40;
+                            if (temp < 59.9f)
+                            {
+                                cy = 8;
+                            }
+                            LCDTinyStr(35,cy,apphmiData.bufferForStrings,true);
+                            apphmiData.messagePointer = 3; //for returning to 4
+                        }
+                        else
+                        {
+                            return; //So that it does not increment apphmiData.messagePointer
+                        }
+                    }
+                }
+                apphmiData.messagePointer++;
             }
             break;
         }
