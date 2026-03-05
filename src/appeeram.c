@@ -80,17 +80,17 @@
 #define TEMPERATURE_POINT_D_Sn_Pb           175
 #define TIME_POINT_D_Sn_Pb                  80
 /** PID controller constants **/
-#define KP  1.0f
-#define KI  1.0f
-#define KD  1.0f
+#define KP  0.80f
+#define KI  0.01f
+#define KD  0.10f
 
-#define KPmax  1.0f
-#define KImax  1.0f
-#define KDmax  1.0f
+#define KPmax  7.0f
+#define KImax  7.0f
+#define KDmax  7.0f
 
-#define KPmin  0.0f
-#define KImin  0.0f
-#define KDmin  0.0f
+#define KPmin  -1.0f
+#define KImin  -1.0f
+#define KDmin  -1.0f
 
 // *****************************************************************************
 /* Application Data
@@ -297,17 +297,17 @@ bool verifyDataStoredInEERAM(void)
         return false;
     }
     memcpy(&appeeramData.Kp, &BufferReception[0x0C], sizeof(appeeramData.Kp)); //Kp
-    if (appeeramData.Kp < -1 || appeeramData.Kp > 1)
+    if (appeeramData.Kp < KPmin || appeeramData.Kp > KPmax)
     {
         return false;
     }
     memcpy(&appeeramData.Ki, &BufferReception[0x10], sizeof(appeeramData.Ki)); //Ki    
-    if (appeeramData.Ki < -1 || appeeramData.Ki > 1)
+    if (appeeramData.Ki < KImin || appeeramData.Ki > KImax)
     {
         return false;
     }
     memcpy(&appeeramData.Kd, &BufferReception[0x14], sizeof(appeeramData.Kd)); //Kd   
-     if (appeeramData.Kd < -1 || appeeramData.Kd > 1)
+     if (appeeramData.Kd < KDmin || appeeramData.Kd > KDmax)
     {
         return false;
     }
@@ -435,7 +435,7 @@ float increaseConstantsPID(uint8_t index)
         {
             if (appeeramData.Ki < KImax)
             {
-                appeeramData.Ki += 0.1f;
+                appeeramData.Ki += 0.01f;
             }
             return appeeramData.Ki;
         }
@@ -465,7 +465,7 @@ float decreaseConstantsPID(uint8_t index)
         {
             if (appeeramData.Ki > KImin)
             {
-                appeeramData.Ki -= 0.1f;
+                appeeramData.Ki -= 0.01f;
             }
             return appeeramData.Ki;
         }
