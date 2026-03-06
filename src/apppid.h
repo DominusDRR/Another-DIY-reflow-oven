@@ -61,10 +61,14 @@ extern "C" {
 typedef enum
 {
     /* Application's state machine's initial state. */
-    APPPID_STATE_INIT=0,
-    APPPID_STATE_SERVICE_TASKS,
+    APPPID_STATE_IDE=0,
+    APPPID_STATE_REQUEST_START_TEMPERATURE_READING,        
     /* TODO: Define states used by the application state machine. */
-
+    APPPID_STATE_INITIALIZE_PID,        
+    APPPID_STATE_WAIT_TEMPERATURE_READING,
+    APPPID_STATE_TURN_ON_WINDOW,
+    APPPID_STATE_TURN_OFF_WINDOW,
+    APPPID_STATE_WAIT_TURN_OFF_WINDOW,
 } APPPID_STATES;
 
 
@@ -85,9 +89,19 @@ typedef struct
 {
     /* The application's current state */
     APPPID_STATES state;
-
     /* TODO: Define any additional data used by the application. */
-
+    uint32_t adelay;
+    uint32_t windowMs;      // ventana 1 s (usa 1000..3000 según SSR)
+    float integral;
+    float prevError;
+    float   controlOutput;       // 0.0..1.0
+    float   tempMeasurement;     // ya la tienes
+    float   setpoint;            // ya la tienes
+    uint32_t lastWindowStartMs; // timestamp inicio ventana (opcional para info)
+    uint32_t lastMeasurementMs; // opcional para debug/timestamps
+    uint32_t onTimeMs;
+    uint32_t onTimeMsCycles;
+    uint32_t offTimeMs;
 } APPPID_DATA;
 
 // *****************************************************************************
