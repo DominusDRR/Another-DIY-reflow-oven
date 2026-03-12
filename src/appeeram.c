@@ -204,6 +204,9 @@ void initializeWriteEERAM(void);
 float getKp(void);
 float getKi(void);
 float getKd(void);
+float getPreHeatTime(void);
+float getPreHeatTemp(void);
+uint32_t getStepsTotalProcessingTime(void);
 
 /* TODO:  Add any necessary local functions.
 */
@@ -569,6 +572,45 @@ float getKi(void)
 float getKd(void)
 {
     return appeeramData.Kd;
+}
+float getPreHeatTime(void)
+{
+    return (float)(appeeramData.timeA);
+}
+
+float getPreHeatTemp(void)
+{
+    return (float)(appeeramData.temperatureA);
+}
+
+/*
+ This function calculates the time between each temperature point to be plotted throughout the process.
+Let's assume the sum of all the times is 10000 seconds. This total time is then divided by the 83 pixels of the screen width.
+
+10000/83 = 12.05 seconds.
+
+This means that each temperature point should be plotted every 12.05 seconds.
+Now, the 12.05 seconds must be converted to clock cycles of the timer used for the asynchronous delays.
+We know that 1 second, or 1000 ms, is 32768 cycles.
+If my variable is 10000 seconds, to convert it to timer cycles it would be:
+
+10000 *_1000ms  = 327680000 cycles (remember that 1000ms is 32768)
+
+ If my variable is 10 seconds, to convert it to timer cycles it would be:
+ 10 * _1000ms = 327680 cycles
+ 
+ If my variable is 1 seconds, to convert it to timer cycles it would be:
+ 1 * _1000ms = 32768 cycles
+
+So 12.05 would be:
+12.05 * 1000ms / 10000 = 395 cycles 
+ */
+uint32_t getStepsTotalProcessingTime(void)
+{
+    float tTotal = (float)(appeeramData.timeA) + (float)(appeeramData.timeB) + (float)(appeeramData.timeC) + (float)(appeeramData.timeD);
+    tTotal = tTotal/83.00f; // seconds/pixels
+    tTotal = tTotal*((float) _1000ms);// tTotal[seconds] 32768[cycles] = [cycles of Timer RTC]
+    return (int32_t)(tTotal);
 }
 
 // *****************************************************************************
