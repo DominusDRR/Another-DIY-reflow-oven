@@ -46,7 +46,9 @@ extern "C" {
 // Section: Type Definitions
 // *****************************************************************************
 // *****************************************************************************
-
+#define NO_ERROR_HMI            0x00
+#define ERROR_SIMPLE_PREHEAT    0x01
+#define ERROR_COMPLEX_PREHEAT   0x02    
 // *****************************************************************************
 /* Application states
 
@@ -95,8 +97,15 @@ typedef enum
     APPHMI_STATE_WAIT_EERAM_TASK_IDLE,
     APPHMI_STATE_WAIT_EERAM_UPDATE_COMPLETED,
     APPHMI_STATE_WAIT_UPDATED_PARAMETERS_MESSAGE,
-    APPHMI_STATE_WAIT_IDLE_TASK_PID,
-    APPHMI_STATE_CLEAN_LCD_BEFORE_GRAPH_TEMPERATURE   
+    APPHMI_STATE_GRAPH_X_AND_Y_AXES,    
+    APPHMI_STATE_START_SIMPLE_PREHEATING_PROCESS,
+    APPHMI_STATE_START_PREHEATING_PROCESS,        
+            
+    APPHMI_STATE_CLEAN_LCD_BEFORE_GRAPH_TEMPERATURE,
+            
+    APPHMI_STATE_FLUX_ACTIVATION,
+    APPHMI_STATE_ERROR,
+    APPHMI_STATE_SHOW_ERROR        
 } APPHMI_STATES;
 
 
@@ -133,6 +142,15 @@ typedef struct
     bool parametersBeenChanged;
     uint32_t x;
     uint32_t y;
+    uint32_t stepsOfTheTotalProcessingTime;
+    uint32_t estimatedTimeProcessWouldTake;
+    uint32_t timeProcessTakes;
+    uint8_t typeError;
+    float initialTemperature;
+    float ramp;
+    float elapsed_s;
+    uint32_t adelayGraph; //If two delays are needed, one for processing and one for graphing, the latter is used for the graphs.
+    bool doNotRecalculateSetPoint;
 } APPHMI_DATA;
 
 // *****************************************************************************
