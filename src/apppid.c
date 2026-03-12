@@ -81,9 +81,10 @@ extern void startTemperatureReading(void);
 /* TODO:  Add any necessary local functions.
 */
 bool IsPIDTaskIdle(void);
-void initializeTaskPID(void);
+void initializeTaskPID(float setPoint);
 float getLastMeasurement(void);
-
+void stopTaskPID(void);
+void setReferenceTaskPID(float setPoint);
 
 // *****************************************************************************
 // *****************************************************************************
@@ -100,14 +101,27 @@ bool IsPIDTaskIdle(void)
     return false;
 }
 
-void initializeTaskPID(void)
+void initializeTaskPID(float setPoint)
 {
+    apppidData.setpoint = setPoint;
     apppidData.state = APPPID_STATE_INITIALIZE_PID;
 }
 
 float getLastMeasurement(void)
 {
     return apppidData.tempMeasurement;
+}
+
+void stopTaskPID(void)
+{
+    APPPID_Initialize();
+}
+void setReferenceTaskPID(float setPoint)
+{
+    if (APPPID_STATE_IDE != apppidData.state && apppidData.setpoint != setPoint)
+    {
+        apppidData.setpoint = setPoint;
+    }
 }
 /*******************************************************************************
   Function:
@@ -125,6 +139,7 @@ void APPPID_Initialize ( void )
      * parameters.
      */
     SSR_Clear();
+    apppidData.tempMeasurement = 10.0f;
 }
 /******************************************************************************
   Function:
@@ -143,7 +158,6 @@ void APPPID_Tasks ( void )
         case APPPID_STATE_IDE: break; //It is in standby mode until a decision is made to use this task.
         case APPPID_STATE_INITIALIZE_PID:
         {
-            apppidData.setpoint = 150.0f;
             apppidData.windowMs = 1000;      // ventana 1 s (usa 1000..3000 según SSR)
             apppidData.integral = 0.0f;
             apppidData.prevError = 0.0f;
