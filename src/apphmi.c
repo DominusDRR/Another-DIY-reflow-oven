@@ -141,6 +141,8 @@ extern float getPreHeatTemp(void);
 extern uint32_t getStepsTotalProcessingTime(void);
 extern void stopTaskPID(void);
 extern void setReferenceTaskPID(float setPoint);
+extern float getFluxTime(void);
+extern float getFluxTemp(void);
 //bool IsONFFTaskIdle(void);
 //void initializeTaskONOFF(void);
 //float getLastMeasurementONOFF(void);
@@ -153,6 +155,9 @@ void returnHomeMenu(void);
 void goParametersMenu(void);
 char isTemperatureOrTime(uint8_t index);
 float predictTimeForT(float Treq);
+void updateCoordinatesY(float temp);
+void plotTemperatureLine(void);
+void displayTemperatureOnScreen(void);
 /* TODO:  Add any necessary local functions.
 */
 void returnHomeMenu(void)
@@ -204,6 +209,33 @@ float predictTimeForT(float Treq)
     }
 }
 
+void updateCoordinatesY(float temp)
+{
+    apphmiData.y = (uint32_t)(1410.0f/29.0f - temp*47.0f/290.0f);  
+}
+
+void plotTemperatureLine(void)
+{
+    uint32_t xPrevious = apphmiData.x;
+    uint32_t yPrevious = apphmiData.y;
+    apphmiData.x++;
+    if (apphmiData.x < 83)
+    {
+        updateCoordinatesY(getLastMeasurement());//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); 
+        if (apphmiData.y > 47) //Avoid writing beyond 47
+        {
+            apphmiData.y = 47;
+        }
+        LCDLine (xPrevious,yPrevious,apphmiData.x,apphmiData.y);
+        apphmiData.adelayGraph = RTC_Timer32CounterGet(); 
+    }
+}
+
+void displayTemperatureOnScreen(void)
+{
+    snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",getLastMeasurement());
+    LCDTinyStr(35,8,apphmiData.bufferForStrings,true);
+}
 // *****************************************************************************
 // *****************************************************************************
 // Section: Application Initialization and State Machine Functions
@@ -969,26 +1001,15 @@ void APPHMI_Tasks ( void )
                     case 0x01:
                     {
                         apphmiData.x = 0; //x represents time.
-                        apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
+                        updateCoordinatesY(getLastMeasurement());//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
                         break;
                     }
                     case 0x02:
                     {
-                        uint32_t xPrevious = apphmiData.x;
-                        uint32_t yPrevious = apphmiData.y;
-                        apphmiData.x++;
-                        if (apphmiData.x < 83)
-                        {
-                            apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); 
-                            if (apphmiData.y > 47) //Avoid writing beyond 47
-                            {
-                                apphmiData.y = 47;
-                            }
-                            LCDLine (xPrevious,yPrevious,apphmiData.x,apphmiData.y);
-                        }
-                        apphmiData.adelay = RTC_Timer32CounterGet(); 
+                        plotTemperatureLine();
                         if (getLastMeasurement() >=  getPreHeatTemp())
                         {
+                            apphmiData.messagePointer = 0x00; 
                             apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
                             return;
                         }
@@ -1000,18 +1021,7 @@ void APPHMI_Tasks ( void )
                         }
                         break;
                     }
-                    case 0x03:
-                    {
-                        float temp = getLastMeasurement();
-                        snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",temp);
-                        /*uint8_t cy = 40;
-                        if (temp < 59.9f)
-                        {
-                            cy = 8;
-                        }*/
-                        LCDTinyStr(35,8,apphmiData.bufferForStrings,true);
-                        break;
-                    }
+                    case 0x03: displayTemperatureOnScreen(); break;
                     default:
                     {
                         if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > apphmiData.stepsOfTheTotalProcessingTime)
@@ -1055,7 +1065,7 @@ void APPHMI_Tasks ( void )
                         {
                             float currentTempMeasurement = getThermocoupleAverageTemp();
                             apphmiData.x = 0; //x represents time.
-                            apphmiData.y = (uint32_t)(1410.0f/29.0f - currentTempMeasurement*47.0f/290.0f); //y represents temperature.
+                            updateCoordinatesY(currentTempMeasurement);//apphmiData.y = (uint32_t)(1410.0f/29.0f - currentTempMeasurement*47.0f/290.0f); //y represents temperature.
                             initializeTaskPID(currentTempMeasurement);//It's just to start the PID
                             apphmiData.adelay = RTC_Timer32CounterGet();//Here I use this variable to gradually increase the PID every 500ms
                             apphmiData.ramp = (getPreHeatTemp() - currentTempMeasurement)/getPreHeatTime(); // rampa ºC/s
@@ -1069,28 +1079,10 @@ void APPHMI_Tasks ( void )
                         }
                         break;
                     }
-                    case 0x02:
-                    {
-                        uint32_t xPrevious = apphmiData.x;
-                        uint32_t yPrevious = apphmiData.y;
-                        apphmiData.x++;
-                        if (apphmiData.x < 83)
-                        {
-                            apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); 
-                            if (apphmiData.y > 47) //Avoid writing beyond 47
-                            {
-                                apphmiData.y = 47;
-                            }
-                            LCDLine (xPrevious,yPrevious,apphmiData.x,apphmiData.y);
-                            apphmiData.adelayGraph = RTC_Timer32CounterGet(); 
-                        }
-                        break;
-                    }
+                    case 0x02: plotTemperatureLine(); break;
                     case 0x03:
                     {
-                        float temp = getLastMeasurement();
-                        snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",temp);
-                        LCDTinyStr(35,8,apphmiData.bufferForStrings,true);
+                        displayTemperatureOnScreen();
                         if (apphmiData.doNotRecalculateSetPoint)
                         {
                             apphmiData.doNotRecalculateSetPoint = false;
@@ -1143,7 +1135,9 @@ void APPHMI_Tasks ( void )
                     {
                         if (getLastMeasurement() <=  getPreHeatTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
                         {
+                            apphmiData.messagePointer = 0x00; 
                             apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
+                            return; 
                         }
                     }
                 }
@@ -1151,85 +1145,16 @@ void APPHMI_Tasks ( void )
             }
             break;
         }
-        case APPHMI_STATE_CLEAN_LCD_BEFORE_GRAPH_TEMPERATURE:
-        {
-//            if (IsGLCDTaskIdle())
-//            {
-//                /***********************************/
-//                /* Y coordinates 
-//                   300ºC*m + cte = 0
-//                   10ºC*m + cte = 47
-//                   m = -47/290 cte= 1410/29   */
-//                /**********************************/
-//                switch (apphmiData.messagePointer)
-//                {
-//                    case 0x00:  LCDClear();             break;
-//                    case 0x01:  LCDLine (0,0,0,47);     break;
-//                    case 0x02:  LCDLine (0,47,83,47);   break;
-//                    case 0x03:  
-//                    {
-//                        apphmiData.adelay = RTC_Timer32CounterGet(); //I'm going to graph the temperature every two seconds
-//                        //float measurement = getThermocoupleAverageTemp();
-//                        apphmiData.x = 0; //x represents time.
-//                        apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
-//                        break;
-//                    }
-//                    case 0x04:
-//                    {
-//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _2000ms)
-//                        {
-//                            uint32_t xPrevious = apphmiData.x;
-//                            uint32_t yPrevious = apphmiData.y;
-//                            apphmiData.x++;
-//                            if (apphmiData.x < 83)
-//                            {
-//                                apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); 
-//                                if (apphmiData.y > 47) //Avoid writing beyond 47
-//                                {
-//                                    apphmiData.y = 47;
-//                                }
-//                                LCDLine (xPrevious,yPrevious,apphmiData.x,apphmiData.y);
-//                            }
-//                            else
-//                            {
-//                                apphmiData.messagePointer = 0;
-//                                return;
-//                            }
-//                        }
-//                        else
-//                        {
-//                            return; //So that it does not increment apphmiData.messagePointer
-//                        }
-//                        break;
-//                    }
-//                    default:
-//                    {
-//                        if (IsGLCDTaskIdle()) // I wait until the GLCD task is idle
-//                        {
-//                            apphmiData.adelay = RTC_Timer32CounterGet(); 
-//                            float temp = getLastMeasurement();
-//                            snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",temp);
-//                            uint8_t cy = 40;
-//                            if (temp < 59.9f)
-//                            {
-//                                cy = 8;
-//                            }
-//                            LCDTinyStr(35,cy,apphmiData.bufferForStrings,true);
-//                            apphmiData.messagePointer = 3; //for returning to 4
-//                        }
-//                        else
-//                        {
-//                            return; //So that it does not increment apphmiData.messagePointer
-//                        }
-//                    }
-//                }
-//                apphmiData.messagePointer++;
-//            }
-            break;
-        }
         case APPHMI_STATE_FLUX_ACTIVATION:
         {
-            
+            if (IsGLCDTaskIdle())
+            {
+                switch (apphmiData.messagePointer)
+                {
+                    case 0x00:  LCDTinyStr(1,1,"Flux Activation",true);   break;
+                }
+                apphmiData.messagePointer++;
+            }
             break;
         }
         case APPHMI_STATE_ERROR:
