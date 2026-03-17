@@ -207,6 +207,8 @@ float getKd(void);
 float getPreHeatTime(void);
 float getPreHeatTemp(void);
 uint32_t getStepsTotalProcessingTime(void);
+float getFluxTime(void);
+float getFluxTemp(void);
 
 /* TODO:  Add any necessary local functions.
 */
@@ -582,7 +584,15 @@ float getPreHeatTemp(void)
 {
     return (float)(appeeramData.temperatureA);
 }
+float getFluxTime(void)
+{
+    return (float)(appeeramData.timeB);
+}
 
+float getFluxTemp(void)
+{
+    return (float)(appeeramData.temperatureB);
+}
 /*
  This function calculates the time between each temperature point to be plotted throughout the process.
 Let's assume the sum of all the times is 10000 seconds. This total time is then divided by the 83 pixels of the screen width.
