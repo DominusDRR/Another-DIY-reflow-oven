@@ -209,6 +209,8 @@ float getPreHeatTemp(void);
 uint32_t getStepsTotalProcessingTime(void);
 float getFluxTime(void);
 float getFluxTemp(void);
+float getReflowTime(void);
+float getReflowTemp(void);
 
 /* TODO:  Add any necessary local functions.
 */
@@ -592,6 +594,16 @@ float getFluxTime(void)
 float getFluxTemp(void)
 {
     return (float)(appeeramData.temperatureB);
+}
+
+float getReflowTime(void)
+{
+    return (float)(appeeramData.timeC);
+}
+
+float getReflowTemp(void)
+{
+    return (float)(appeeramData.temperatureC);
 }
 /*
  This function calculates the time between each temperature point to be plotted throughout the process.
