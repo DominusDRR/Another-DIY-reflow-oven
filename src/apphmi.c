@@ -31,6 +31,7 @@
 #include "definitions.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 //#include <stdint.h>
 //#include <stdbool.h>
 // *****************************************************************************
@@ -143,6 +144,8 @@ extern void stopTaskPID(void);
 extern void setReferenceTaskPID(float setPoint);
 extern float getFluxTime(void);
 extern float getFluxTemp(void);
+extern float getReflowTime(void);
+extern float getReflowTemp(void);
 //bool IsONFFTaskIdle(void);
 //void initializeTaskONOFF(void);
 //float getLastMeasurementONOFF(void);
@@ -1185,38 +1188,71 @@ void APPHMI_Tasks ( void )
                     case 0x04:
                     {
                         apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
+                        
                         float s = apphmiData.elapsed_s / getFluxTime();
                         if (s < 0.0f) s = 0.0f;
                         if (s > 1.0f) s = 1.0f;
-                        // cubic smoothstep: smooth = s^2 * (3 - 2*s)
-                        //float smooth = s * s * (3.0f - 2.0f * s); //hace una contante un tiempo y sube suavemente, pero no quiero que sea cote
-                        float a = 0.25f;  // 0.2 a 0.4 suele ir bien
-                        float smooth = s * (a + (1.0f - a) * s);
 
-                        // setpoint suave entre initialTemperature y getFluxTemp()
-                        float T0 = apphmiData.initialTemperature;
-                        float T1 = getFluxTemp();
-                        float setpoint = T0 + (T1 - T0) * smooth;
+                        // Si quieres fidelidad simple, usa lineal:
+                        //float setpoint = Tb + (Tc - Tb) * s;
 
-                         // protección por si hay pequeñas diferencias numéricas
-                        if (T1 >= T0 && setpoint > T1) setpoint = T1;
-                        if (T1 <  T0 && setpoint < T1) setpoint = T1;
-                        // envía la referencia al PID
+                        // Si quieres una subida un poco más suave al inicio:
+                         float eased = 1.0f - powf(1.0f - s, 1.6f);
+                         float setpoint = getPreHeatTemp() + (getFluxTemp() - getPreHeatTemp()) * eased;
+
                         setReferenceTaskPID(setpoint);
-                         // condición de término por temperatura alcanzada
-                        if ((T1 >= T0 && setpoint >= T1) || (T1 < T0 && setpoint <= T1))
+
+                        if (s >= 1.0f)
                         {
-                            setReferenceTaskPID(T1); // forzar valor final exacto
+                            setReferenceTaskPID(getFluxTemp());
+                            apphmiData.messagePointer = 0x00; 
                             apphmiData.state = APPHMI_STATE_REFLOW;
                             return;
                         }
+                        
                         // condición de término por tiempo excedido (fallo)
-                        if (apphmiData.elapsed_s > getFluxTime())
+                         if (apphmiData.elapsed_s > getFluxTime())//if (apphmiData.elapsed_s > getReflowTime())
                         {
                             apphmiData.typeError = ERROR_FLUX;
                             apphmiData.state = APPHMI_STATE_ERROR;
                             return;
                         }
+                        
+                        
+                        
+//                        float s = apphmiData.elapsed_s / getFluxTime();
+//                        if (s < 0.0f) s = 0.0f;
+//                        if (s > 1.0f) s = 1.0f;
+//                        // cubic smoothstep: smooth = s^2 * (3 - 2*s)
+//                        //float smooth = s * s * (3.0f - 2.0f * s); //hace una contante un tiempo y sube suavemente, pero no quiero que sea cote
+//                        float a = 0.25f;  // 0.2 a 0.4 suele ir bien
+//                        float smooth = s * (a + (1.0f - a) * s);
+//
+//                        // setpoint suave entre initialTemperature y getFluxTemp()
+//                        float T0 = apphmiData.initialTemperature;
+//                        float T1 = getFluxTemp();
+//                        float setpoint = T0 + (T1 - T0) * smooth;
+//
+//                         // protección por si hay pequeñas diferencias numéricas
+//                        if (T1 >= T0 && setpoint > T1) setpoint = T1;
+//                        if (T1 <  T0 && setpoint < T1) setpoint = T1;
+//                        // envía la referencia al PID
+//                        setReferenceTaskPID(setpoint);
+//                         // condición de término por temperatura alcanzada
+//                        if ((T1 >= T0 && setpoint >= T1) || (T1 < T0 && setpoint <= T1))
+//                        {
+//                            setReferenceTaskPID(T1); // forzar valor final exacto
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_REFLOW;
+//                            return;
+//                        }
+//                        // condición de término por tiempo excedido (fallo)
+//                        if (apphmiData.elapsed_s > getFluxTime())
+//                        {
+//                            apphmiData.typeError = ERROR_FLUX;
+//                            apphmiData.state = APPHMI_STATE_ERROR;
+//                            return;
+//                        }
                         apphmiData.adelay = RTC_Timer32CounterGet();
                         break;
                     }
@@ -1255,6 +1291,108 @@ void APPHMI_Tasks ( void )
         }
         case APPHMI_STATE_REFLOW:
         {
+            if (IsGLCDTaskIdle())
+            {
+                switch (apphmiData.messagePointer)
+                {
+                    case 0x00:  
+                    {
+                        apphmiData.doNotRecalculateSetPoint = false;
+                        LCDTinyStr(2,1,"Reflow",true);   
+                        if (getReflowTemp() <= getLastMeasurement())
+                        {
+                            setReferenceTaskPID(getReflowTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
+                            apphmiData.messagePointer = 0x05; //so that it goes into default
+                        }
+                        break;
+                    }
+                    case 0x01:
+                    {
+                        apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                        apphmiData.elapsed_s = 0.0f;
+                        apphmiData.adelay = RTC_Timer32CounterGet();
+                        break;
+                    }
+                    case 0x02: plotTemperatureLine(); break;
+                    case 0x03:
+                    {
+                        displayTemperatureOnScreen();
+                        if (apphmiData.doNotRecalculateSetPoint)
+                        {
+                            apphmiData.doNotRecalculateSetPoint = false;
+                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
+                        }
+                        break;
+                    }
+                    case 0x04:
+                    {
+                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay)) / ((float)(_1000ms));
+                        
+                        float s = apphmiData.elapsed_s / getReflowTime();
+                        if (s < 0.0f) s = 0.0f;
+                        if (s > 1.0f) s = 1.0f;
+
+                        // Si quieres fidelidad simple, usa lineal:
+                        //float setpoint = Tb + (Tc - Tb) * s;
+
+                        // Si quieres una subida un poco más suave al inicio:
+                         float eased = 1.0f - powf(1.0f - s, 1.6f);
+                         float setpoint = getFluxTemp() + (getReflowTemp() - getFluxTemp()) * eased;
+
+                        setReferenceTaskPID(setpoint);
+
+                        if (s >= 1.0f)
+                        {
+                            setReferenceTaskPID(getReflowTemp());
+                            apphmiData.state = APPHMI_STATE_COOLING;
+                            return;
+                        }
+                        
+                        // condición de término por tiempo excedido (fallo)
+                        if (apphmiData.elapsed_s > getReflowTime())
+                        {
+                            apphmiData.typeError = ERROR_REFLOW;
+                            apphmiData.state = APPHMI_STATE_ERROR;
+                            return;
+                        }
+                        apphmiData.adelay = RTC_Timer32CounterGet();
+                        break;
+                    }
+                    case 0x05:
+                    {
+                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+                        {
+                           apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
+                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+                        }
+                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+                        {
+                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+                            apphmiData.doNotRecalculateSetPoint = true;
+                        }
+                        else
+                        {
+                            return; // we prevent the pointer from incrementing.
+                        }
+                        break;
+                    }
+                    default:
+                    {
+                        if (getLastMeasurement() <=  getReflowTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
+                        {
+                            apphmiData.messagePointer = 0x00; 
+                            apphmiData.state = APPHMI_STATE_COOLING; //If the preheating temperature is reached, the flux should enter its activation state.
+                            return; 
+                        }
+                    }
+                }
+                apphmiData.messagePointer++;
+             }
+            break;
+        }
+        case APPHMI_STATE_COOLING:
+        {
             LED_Set();
             break;
         }
@@ -1276,10 +1414,19 @@ void APPHMI_Tasks ( void )
                     {
                         switch (apphmiData.typeError)
                         {
-                            case ERROR_SIMPLE_PREHEAT:  
-                            case ERROR_COMPLEX_PREHEAT: 
-                            case ERROR_FLUX:            LCDStr(0x02,(unsigned char *)"Temp wasn't reached in time",false, true);    break;
+                            case ERROR_SIMPLE_PREHEAT:  LCDStr(0x01,(unsigned char *)"Preheat,false, true",false, false);   break;          
+                            case ERROR_COMPLEX_PREHEAT: LCDStr(0x01,(unsigned char *)"Complex Preheat",false, false);       break;
+                            case ERROR_FLUX:            LCDStr(0x01,(unsigned char *)"FLUX",false, false);                  break;
+                            case ERROR_REFLOW:          LCDStr(0x01,(unsigned char *)"REFLOW",false, false);                break;
                             default:                    LCDStr(0x02,(unsigned char *)"Unknown error",false, true);                      
+                        }
+                        break;
+                    }
+                    case 0x02:
+                    {
+                        if (apphmiData.typeError >= ERROR_SIMPLE_PREHEAT && ERROR_REFLOW <= apphmiData.typeError)
+                        {
+                            LCDStr(0x02,(unsigned char *)"Temp wasn't reached in time",false, true);    break;
                         }
                         break;
                     }
