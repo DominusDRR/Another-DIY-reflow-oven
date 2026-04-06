@@ -50,6 +50,7 @@ extern "C" {
 #define ERROR_SIMPLE_PREHEAT    0x01
 #define ERROR_COMPLEX_PREHEAT   0x02    
 #define ERROR_FLUX              0x03    
+#define ERROR_REFLOW            0x04    
 // *****************************************************************************
 /* Application states
 
@@ -102,7 +103,8 @@ typedef enum
     APPHMI_STATE_START_SIMPLE_PREHEATING_PROCESS,
     APPHMI_STATE_START_PREHEATING_PROCESS,        
     APPHMI_STATE_FLUX_ACTIVATION,
-    APPHMI_STATE_REFLOW,        
+    APPHMI_STATE_REFLOW,   
+    APPHMI_STATE_COOLING,        
     APPHMI_STATE_ERROR,
     APPHMI_STATE_SHOW_ERROR        
 } APPHMI_STATES;
