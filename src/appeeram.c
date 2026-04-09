@@ -211,7 +211,8 @@ float getFluxTime(void);
 float getFluxTemp(void);
 float getReflowTime(void);
 float getReflowTemp(void);
-
+float getCoolingTime(void);
+float getCoolingTemp(void);
 /* TODO:  Add any necessary local functions.
 */
 void initializeParametersI2C2(void)
@@ -605,6 +606,16 @@ float getReflowTemp(void)
 {
     return (float)(appeeramData.temperatureC);
 }
+
+float getCoolingTime(void)
+{
+    return (float)(appeeramData.timeD);
+}
+
+float getCoolingTemp(void)
+{
+    return (float)(appeeramData.temperatureD);
+}
 /*
  This function calculates the time between each temperature point to be plotted throughout the process.
 Let's assume the sum of all the times is 10000 seconds. This total time is then divided by the 83 pixels of the screen width.
@@ -631,7 +642,7 @@ uint32_t getStepsTotalProcessingTime(void)
 {
     float tTotal = (float)(appeeramData.timeA) + (float)(appeeramData.timeB) + (float)(appeeramData.timeC) + (float)(appeeramData.timeD);
     tTotal = tTotal/83.00f; // seconds/pixels
-    tTotal = tTotal*((float) _1000ms);// tTotal[seconds] 32768[cycles] = [cycles of Timer RTC]
+    tTotal = 1.20f * tTotal*((float) _1000ms);// tTotal[seconds] 32768[cycles] = [cycles of Timer RTC], This time is increased by 20% so that the cooling process can be seen on the screen.
     return (int32_t)(tTotal);
 }
 
