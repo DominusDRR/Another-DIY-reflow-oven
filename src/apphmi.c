@@ -978,7 +978,8 @@ void APPHMI_Tasks ( void )
                             apphmiData.messagePointer = 0x00; //I'm going to use messagePointer to do multiple things in a single state machine.
                             apphmiData.stepsOfTheTotalProcessingTime = getStepsTotalProcessingTime();
                             float time_pred = predictTimeForT(getPreHeatTemp()); //I get the time for that given temperature
-                            apphmiData.timeProcessTakes = RTC_Timer32CounterGet(); 
+                            apphmiData.timeProcessTakes = RTC_Timer32CounterGet();
+                            apphmiData.x = 0; //x represents time.
                             if (getPreHeatTime() < time_pred - TOLERANCIA_SEC)         
                             {        
                                 initializeTaskPID(getPreHeatTemp());
@@ -1004,12 +1005,7 @@ void APPHMI_Tasks ( void )
                 switch (apphmiData.messagePointer)
                 {
                     case 0x00:  LCDTinyStr(2,1,"Simple Preheat",true);   break;
-                    case 0x01:
-                    {
-                        apphmiData.x = 0; //x represents time.
-                        updateCoordinatesY(getLastMeasurement());//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
-                        break;
-                    }
+                    case 0x01:  updateCoordinatesY(getLastMeasurement()); break;//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
                     case 0x02:
                     {
                         plotTemperatureLine();
