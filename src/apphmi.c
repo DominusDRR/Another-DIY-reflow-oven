@@ -1067,7 +1067,7 @@ void APPHMI_Tasks ( void )
                         if (IsMaxTaskIdle())
                         {
                             float currentTempMeasurement = getThermocoupleAverageTemp();
-                            apphmiData.x = 0; //x represents time.
+                            //apphmiData.x = 0; //x represents time.
                             updateCoordinatesY(currentTempMeasurement);//apphmiData.y = (uint32_t)(1410.0f/29.0f - currentTempMeasurement*47.0f/290.0f); //y represents temperature.
                             initializeTaskPID(currentTempMeasurement);//It's just to start the PID
                             apphmiData.adelay = RTC_Timer32CounterGet();//Here I use this variable to gradually increase the PID every 500ms
@@ -1169,7 +1169,7 @@ void APPHMI_Tasks ( void )
                     }
                     case 0x01:
                     {
-                        apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                         apphmiData.elapsed_s = 0.0f;
                         apphmiData.adelay = RTC_Timer32CounterGet();
                         break;
@@ -1260,7 +1260,7 @@ void APPHMI_Tasks ( void )
                     {
                         if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
                         {
-                           apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                            //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
                            apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
                         }
@@ -1309,7 +1309,7 @@ void APPHMI_Tasks ( void )
                     }
                     case 0x01:
                     {
-                        apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                         apphmiData.elapsed_s = 0.0f;
                         apphmiData.adelay = RTC_Timer32CounterGet();
                         break;
@@ -1364,7 +1364,7 @@ void APPHMI_Tasks ( void )
                     {
                         if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
                         {
-                           apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                            //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
                            apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
                         }
@@ -1413,7 +1413,7 @@ void APPHMI_Tasks ( void )
                     }
                     case 0x01:
                     {
-                        apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                         apphmiData.elapsed_s = 0.0f;
                         apphmiData.adelay = RTC_Timer32CounterGet();
                         break;
@@ -1462,7 +1462,7 @@ void APPHMI_Tasks ( void )
                     {
                         if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
                         {
-                           apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
                            //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
                            apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
                         }
