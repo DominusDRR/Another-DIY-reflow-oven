@@ -42,6 +42,12 @@
 #define TOTAL_ITEMS          (sizeof(msgsParametersMenu)/sizeof(*msgsParametersMenu)) // 8 messages
 #define VISIBLE_ROWS         6
 #define TOLERANCIA_SEC 10.0f    //10 seconds
+
+#define SIMPLE_PREHEAT  0x00
+#define COMPLEX_PREHEAT 0x01   
+#define FLUX_ACTIVATION 0x02
+#define REFLOW          0x03    
+#define COOLING         0x04     
 // *****************************************************************************
 /* Application Data
 
@@ -164,6 +170,8 @@ float predictTimeForT(float Treq);
 void updateCoordinatesY(float temp);
 void plotTemperatureLine(void);
 void displayTemperatureOnScreen(void);
+void startProfilePhase(const char *dataPtr, float temperatureToReach, uint8_t typeProfile, APPHMI_STATES nextState, float timeToReach, float initialTemperature);
+void executeProfilePhase(void);
 /* TODO:  Add any necessary local functions.
 */
 void returnHomeMenu(void)
@@ -241,6 +249,199 @@ void displayTemperatureOnScreen(void)
 {
     snprintf(apphmiData.bufferForStrings, sizeof(apphmiData.bufferForStrings),"Temp %.1f C",getLastMeasurement());
     LCDTinyStr(35,40,apphmiData.bufferForStrings,true);
+}
+
+void startProfilePhase(const char *dataPtr, float temperatureToReach, uint8_t typeProfile, APPHMI_STATES nextState, float timeToReach, float initialTemperature)
+{
+    apphmiData.dataPtr = dataPtr;
+    apphmiData.temperatureToReach = temperatureToReach;
+    apphmiData.typeProfile = typeProfile;
+    apphmiData.nextState = nextState;
+    apphmiData.timeToReach = timeToReach;
+    apphmiData.initialTemperature = initialTemperature;
+}
+
+void executeProfilePhase(void)
+{
+    if (IsGLCDTaskIdle())
+    {
+        switch (apphmiData.messagePointer)
+        {
+            case 0x00:  
+            {
+                if (apphmiData.typeProfile == COMPLEX_PREHEAT)
+                {
+                    startTemperatureReading();//It is necessary to initialize the temperature, since the PID task has not yet started; it is also the one that is constantly activating the temperature reading.
+                }
+                apphmiData.doNotRecalculateSetPoint = false;
+                LCDTinyStr(2,1,apphmiData.dataPtr,true);   
+                if (apphmiData.typeProfile == COOLING? apphmiData.temperatureToReach >= getLastMeasurement() : apphmiData.temperatureToReach <= getLastMeasurement())
+                {
+                    setReferenceTaskPID(apphmiData.temperatureToReach);//It would be a rare case where the oven temperature is above the desired temperature from the start.
+                    apphmiData.messagePointer = 0x05;//so that it goes into default
+                }
+//                if (apphmiData.temperatureToReach <= getLastMeasurement())//*** revisar para enfriamiento
+//                {
+//                    setReferenceTaskPID(apphmiData.temperatureToReach);//It would be a rare case where the oven temperature is above the desired temperature from the start.
+//                    apphmiData.messagePointer = 0x05; //so that it goes into default
+//                }
+                buttonPressedSound();
+                break;
+            }
+            case 0x01:
+            {
+                if (SIMPLE_PREHEAT == apphmiData.typeProfile || COMPLEX_PREHEAT == apphmiData.typeProfile)
+                {
+                    updateCoordinatesY(getLastMeasurement());
+                }
+                if (SIMPLE_PREHEAT != apphmiData.typeProfile)
+                {
+                    //apphmiData.initialTemperature = getThermocoupleAverageTemp();//***
+                    apphmiData.elapsed_s = 0.0f;
+                    apphmiData.adelay = RTC_Timer32CounterGet();
+                }
+                if (COMPLEX_PREHEAT == apphmiData.typeProfile)
+                {
+                    initializeTaskPID(getThermocoupleAverageTemp());//It's just to start the PID
+                    apphmiData.ramp = (apphmiData.temperatureToReach - getThermocoupleAverageTemp())/apphmiData.timeToReach; // rampa ºC/s
+                }
+                break;
+            }
+            case 0x02: 
+            {
+                plotTemperatureLine(); 
+                if (SIMPLE_PREHEAT == apphmiData.typeProfile)
+                {
+                    if (getLastMeasurement() >= apphmiData.temperatureToReach)
+                    {
+                        apphmiData.messagePointer = 0x00; 
+                        apphmiData.state = apphmiData.nextState; //If the preheating temperature is reached, the flux should enter its activation state.
+                        return;
+                    }
+                    if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.timeProcessTakes) > apphmiData.estimatedTimeProcessWouldTake)
+                    {
+                        apphmiData.typeError = ERROR_SIMPLE_PREHEAT;
+                        apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
+                        return;
+                    }
+                }
+                break;
+            }     
+            case 0x03:
+            {
+                displayTemperatureOnScreen();
+                if (apphmiData.doNotRecalculateSetPoint && SIMPLE_PREHEAT != apphmiData.typeProfile)
+                {
+                    apphmiData.doNotRecalculateSetPoint = false;
+                    apphmiData.messagePointer = 0x04; //to skip the set point calculation
+                }
+                break;
+            }
+            case 0x04:
+            { 
+                apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
+                switch (apphmiData.typeProfile)
+                {
+                    case SIMPLE_PREHEAT:
+                    {
+                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+                        {
+                            apphmiData.messagePointer = 0x02; //To return to state 2
+                        }
+                        return; //To prevent the increase at the end the switch
+                    }
+                    case COMPLEX_PREHEAT:
+                    {
+                        float setpoint = apphmiData.initialTemperature + apphmiData.ramp * apphmiData.elapsed_s; // ramp*0.5s = ºC/s *s = ºC
+                        if (apphmiData.ramp > 0.0f && setpoint > apphmiData.temperatureToReach) setpoint = apphmiData.temperatureToReach;
+                        if (apphmiData.ramp < 0.0f && setpoint < apphmiData.temperatureToReach) setpoint = apphmiData.temperatureToReach;
+                        setReferenceTaskPID(setpoint); //set reference to PID
+                        if (setpoint >= getPreHeatTemp()) 
+                        {
+                            apphmiData.messagePointer = 0x00; 
+                            setReferenceTaskPID(apphmiData.temperatureToReach);//For safety, we set the preheating temperature; there is a possibility that the setpoint may be slightly higher.
+                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
+                            return;
+                        }
+                        if (apphmiData.elapsed_s >= apphmiData.timeToReach)
+                        {
+                            apphmiData.typeError = ERROR_COMPLEX_PREHEAT;
+                            apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
+                        }
+                        break;
+                    }
+                    default:
+                    { 
+                        float s = apphmiData.elapsed_s / apphmiData.timeToReach;
+                        if (s < 0.0f) s = 0.0f;
+                        if (s > 1.0f) s = 1.0f;
+                        if (COOLING != apphmiData.typeProfile)
+                        {
+                            float eased = 1.0f - powf(1.0f - s, 1.6f);
+                            float setpoint = apphmiData.initialTemperature + (apphmiData.temperatureToReach - apphmiData.initialTemperature) * eased;
+                            setReferenceTaskPID(setpoint);
+                            if (s >= 1.0f)
+                            {
+                                setReferenceTaskPID(apphmiData.temperatureToReach);
+                                apphmiData.messagePointer = 0x00; 
+                                apphmiData.state = apphmiData.nextState;
+                                return;
+                            }
+                            if (apphmiData.elapsed_s > apphmiData.timeToReach)//if (apphmiData.elapsed_s > getReflowTime())
+                            {
+                                apphmiData.typeError = ERROR_FLUX;
+                                apphmiData.state = APPHMI_STATE_ERROR;
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            float setpoint = apphmiData.initialTemperature + (apphmiData.temperatureToReach - apphmiData.initialTemperature) * s;
+                            if (apphmiData.initialTemperature >= apphmiData.temperatureToReach && setpoint < apphmiData.temperatureToReach) setpoint = apphmiData.temperatureToReach;
+                            if (apphmiData.initialTemperature <  apphmiData.temperatureToReach && setpoint > apphmiData.temperatureToReach) setpoint = apphmiData.temperatureToReach;
+                            setReferenceTaskPID(setpoint);
+                            if (s >= 1.0f)
+                            {
+                                setReferenceTaskPID(apphmiData.temperatureToReach);
+                                apphmiData.state = apphmiData.nextState;
+                                return;
+                            }
+                        }
+                    }
+                }
+                apphmiData.adelay = RTC_Timer32CounterGet();
+                break;
+            } 
+            case 0x05://This state is never reached in Simple Warm-up.
+            {
+                if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+                {
+                    //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+                    apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+                }
+                else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+                {
+                    apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+                    apphmiData.doNotRecalculateSetPoint = true;
+                }
+                else
+                {
+                    return; // we prevent the pointer from incrementing.
+                }
+                break;
+            }
+            default:
+            {
+                if (getLastMeasurement() <=  apphmiData.temperatureToReach)//Wait until the temperature drops to preHeat, this doesn't make much sense.
+                {
+                    apphmiData.messagePointer = 0x00; 
+                    apphmiData.state = apphmiData.nextState; //If the preheating temperature is reached, the actual state should go to nextState
+                    return; 
+                }
+            }
+        }
+        apphmiData.messagePointer++;
+    }
 }
 // *****************************************************************************
 // *****************************************************************************
@@ -998,501 +1199,498 @@ void APPHMI_Tasks ( void )
             }
             break;
         }
-        case APPHMI_STATE_START_SIMPLE_PREHEATING_PROCESS:
+        case APPHMI_STATE_START_SIMPLE_PREHEATING_PROCESS: 
         {
-            if (IsGLCDTaskIdle())
-            {
-                switch (apphmiData.messagePointer)
-                {
-                    case 0x00:  LCDTinyStr(2,1,"Simple Preheat",true);   break;
-                    case 0x01:  updateCoordinatesY(getLastMeasurement()); break;//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
-                    case 0x02:
-                    {
-                        plotTemperatureLine();
-                        if (getLastMeasurement() >=  getPreHeatTemp())
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return;
-                        }
-                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.timeProcessTakes) > apphmiData.estimatedTimeProcessWouldTake)
-                        {
-                            apphmiData.typeError = ERROR_SIMPLE_PREHEAT;
-                            apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return;
-                        }
-                        break;
-                    }
-                    case 0x03: displayTemperatureOnScreen(); break;
-                    default:
-                    {
-                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
-                        {
-                            apphmiData.messagePointer = 0x02; //To return to state 2
-                        }
-                        return; //To prevent the increase at the end the switch
-                    }
-                }
-                apphmiData.messagePointer++;
-            }
+            startProfilePhase("Simple Preheat", getPreHeatTemp(),SIMPLE_PREHEAT,APPHMI_STATE_FLUX_ACTIVATION,0.0f,0.0f);
+            apphmiData.state = APPHMI_STATE_PROFILE_PHASE;
             break;
         }
         case APPHMI_STATE_START_PREHEATING_PROCESS:
         {
-            if (IsGLCDTaskIdle())
-            {
-                switch (apphmiData.messagePointer)
-                {
-                    case 0x00:
-                    {
-                        if (IsMaxTaskIdle())
-                        {
-                            startTemperatureReading();//It is necessary to initialize the temperature, since the PID task has not yet started; it is also the one that is constantly activating the temperature reading.
-                            LCDTinyStr(2,1,"Complex Preheat",true); 
-                            if (getPreHeatTemp() <= getLastMeasurement())
-                            {
-                                setReferenceTaskPID(getPreHeatTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
-                                apphmiData.messagePointer = 0x05; //so that it goes into default
-                            }
-                            break;
-                        }
-                        else
-                        {
-                            return; //If the max is occupied, we prevent the pointer from incrementing.
-                        }
-                        break;
-                    }
-                    case 0x01:
-                    {
-                        if (IsMaxTaskIdle())
-                        {
-                            float currentTempMeasurement = getThermocoupleAverageTemp();
-                            //apphmiData.x = 0; //x represents time.
-                            updateCoordinatesY(currentTempMeasurement);//apphmiData.y = (uint32_t)(1410.0f/29.0f - currentTempMeasurement*47.0f/290.0f); //y represents temperature.
-                            initializeTaskPID(currentTempMeasurement);//It's just to start the PID
-                            apphmiData.adelay = RTC_Timer32CounterGet();//Here I use this variable to gradually increase the PID every 500ms
-                            apphmiData.ramp = (getPreHeatTemp() - currentTempMeasurement)/getPreHeatTime(); // rampa ºC/s
-                            apphmiData.initialTemperature = currentTempMeasurement;
-                            apphmiData.doNotRecalculateSetPoint = false;
-                            apphmiData.elapsed_s = 0.0f;
-                        }
-                        else
-                        {
-                            return; //If the max is occupied, we prevent the pointer from incrementing.
-                        }
-                        break;
-                    }
-                    case 0x02: plotTemperatureLine(); break;
-                    case 0x03:
-                    {
-                        displayTemperatureOnScreen();
-                        if (apphmiData.doNotRecalculateSetPoint)
-                        {
-                            apphmiData.doNotRecalculateSetPoint = false;
-                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
-                        }
-                        break;
-                    }
-                    case 0x04:
-                    {
-                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
-                        // calcula setpoint deseado en este instante (no pasar de Tmp objetivo (getPreHeatTemp))
-                        float setpoint = apphmiData.initialTemperature + apphmiData.ramp * apphmiData.elapsed_s; // ramp*0.5s = ºC/s *s = ºC
-                        if (apphmiData.ramp > 0.0f && setpoint > getPreHeatTemp()) setpoint = getPreHeatTemp();
-                        if (apphmiData.ramp < 0.0f && setpoint < getPreHeatTemp()) setpoint = getPreHeatTemp();
-                        // envía la referencia al PID
-                        setReferenceTaskPID(setpoint);
-                        // si llegamos al objetivo temporal o de temperatura, salimos
-                        if (setpoint >= getPreHeatTemp()) 
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            setReferenceTaskPID(getPreHeatTemp());//For safety, we set the preheating temperature; there is a possibility that the setpoint may be slightly higher.
-                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return;
-                        }
-                        if (apphmiData.elapsed_s >= getPreHeatTime())
-                        {
-                            apphmiData.typeError = ERROR_COMPLEX_PREHEAT;
-                            apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
-                        }
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x05:
-                    {
-                       if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
-                       {
-                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
-                       }
-                       else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
-                       {
-                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
-                            apphmiData.doNotRecalculateSetPoint = true;
-                       }
-                       else
-                       {
-                            return; //If the max is occupied, we prevent the pointer from incrementing.
-                       }
-                       break;
-                    }
-                    default:
-                    {
-                        if (getLastMeasurement() <=  getPreHeatTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return; 
-                        }
-                    }
-                }
-                apphmiData.messagePointer++;
-            }
+            startProfilePhase("Complex Preheat",getPreHeatTemp(),COMPLEX_PREHEAT,APPHMI_STATE_FLUX_ACTIVATION,getPreHeatTime(),0.0f);
+            apphmiData.state = APPHMI_STATE_PROFILE_PHASE;
             break;
         }
-        case APPHMI_STATE_FLUX_ACTIVATION:
+        case APPHMI_STATE_FLUX_ACTIVATION: 
         {
-            if (IsGLCDTaskIdle())
-            {
-                switch (apphmiData.messagePointer)
-                {
-                    case 0x00:  
-                    {
-                        apphmiData.doNotRecalculateSetPoint = false;
-                        LCDTinyStr(2,1,"Flux Activation",true);   
-                        if (getFluxTemp() <= getLastMeasurement())
-                        {
-                            setReferenceTaskPID(getFluxTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
-                            apphmiData.messagePointer = 0x05; //so that it goes into default
-                        }
-                        buttonPressedSound();
-                        break;
-                    }
-                    case 0x01:
-                    {
-                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                        apphmiData.elapsed_s = 0.0f;
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x02: plotTemperatureLine(); break;
-                    case 0x03:
-                    {
-                        displayTemperatureOnScreen();
-                        if (apphmiData.doNotRecalculateSetPoint)
-                        {
-                            apphmiData.doNotRecalculateSetPoint = false;
-                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
-                        }
-                        break;
-                    }
-                    case 0x04:
-                    {
-                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
-                        
-                        float s = apphmiData.elapsed_s / getFluxTime();
-                        if (s < 0.0f) s = 0.0f;
-                        if (s > 1.0f) s = 1.0f;
-
-                        // Si quieres fidelidad simple, usa lineal:
-                        //float setpoint = Tb + (Tc - Tb) * s;
-
-                        // Si quieres una subida un poco más suave al inicio:
-                         float eased = 1.0f - powf(1.0f - s, 1.6f);
-                         float setpoint = getPreHeatTemp() + (getFluxTemp() - getPreHeatTemp()) * eased;
-
-                        setReferenceTaskPID(setpoint);
-
-                        if (s >= 1.0f)
-                        {
-                            setReferenceTaskPID(getFluxTemp());
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_REFLOW;
-                            return;
-                        }
-                        
-                        // condición de término por tiempo excedido (fallo)
-                         if (apphmiData.elapsed_s > getFluxTime())//if (apphmiData.elapsed_s > getReflowTime())
-                        {
-                            apphmiData.typeError = ERROR_FLUX;
-                            apphmiData.state = APPHMI_STATE_ERROR;
-                            return;
-                        }
-                        
-                        
-                        
+            startProfilePhase("Flux Activation",getFluxTemp(),FLUX_ACTIVATION, APPHMI_STATE_REFLOW,getFluxTime(),getPreHeatTemp());
+            apphmiData.state = APPHMI_STATE_PROFILE_PHASE;
+            break;
+        }
+        case APPHMI_STATE_REFLOW:
+        {
+            startProfilePhase("Reflow         ",getReflowTemp(),REFLOW,APPHMI_STATE_COOLING, getReflowTime(), getFluxTemp());
+            apphmiData.state = APPHMI_STATE_PROFILE_PHASE;
+            break;
+        }
+        case APPHMI_STATE_COOLING:
+        {
+            startProfilePhase("Cooling",getCoolingTemp(),COOLING,APPHMI_STATE_AFTER_COOLING,getCoolingTime(),getReflowTemp());
+            apphmiData.state = APPHMI_STATE_PROFILE_PHASE;
+            break;
+        }
+        case APPHMI_STATE_PROFILE_PHASE: executeProfilePhase(); break;
+        
+//        case APPHMI_STATE_START_SIMPLE_PREHEATING_PROCESS: 
+//        {
+//            if (IsGLCDTaskIdle())
+//            {
+//                switch (apphmiData.messagePointer)
+//                {
+//                    case 0x00:  LCDTinyStr(2,1,"Simple Preheat",true);   break;
+//                    case 0x01:  updateCoordinatesY(getLastMeasurement()); break;//apphmiData.y = (uint32_t)(1410.0f/29.0f - getLastMeasurement()*47.0f/290.0f); //y represents temperature.
+//                    case 0x02:
+//                    {
+//                        plotTemperatureLine();
+//                        if (getLastMeasurement() >=  getPreHeatTemp())
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return;
+//                        }
+//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.timeProcessTakes) > apphmiData.estimatedTimeProcessWouldTake)
+//                        {
+//                            apphmiData.typeError = ERROR_SIMPLE_PREHEAT;
+//                            apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return;
+//                        }
+//                        break;
+//                    }
+//                    case 0x03: displayTemperatureOnScreen(); break;
+//                    default:
+//                    {
+//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+//                        {
+//                            apphmiData.messagePointer = 0x02; //To return to state 2
+//                        }
+//                        return; //To prevent the increase at the end the switch
+//                    }
+//                }
+//                apphmiData.messagePointer++;
+//            }
+//            break;
+//        }
+//        case APPHMI_STATE_START_PREHEATING_PROCESS: 
+//        {
+//            if (IsGLCDTaskIdle())
+//            {
+//                switch (apphmiData.messagePointer)
+//                {
+//                    case 0x00:
+//                    {
+//                        if (IsMaxTaskIdle())
+//                        {
+//                            startTemperatureReading();//It is necessary to initialize the temperature, since the PID task has not yet started; it is also the one that is constantly activating the temperature reading.
+//                            LCDTinyStr(2,1,"Complex Preheat",true); 
+//                            if (getPreHeatTemp() <= getLastMeasurement())
+//                            {
+//                                setReferenceTaskPID(getPreHeatTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
+//                                apphmiData.messagePointer = 0x05; //so that it goes into default
+//                            }
+//                            break;
+//                        }
+//                        else
+//                        {
+//                            return; //If the max is occupied, we prevent the pointer from incrementing.
+//                        }
+//                        break;
+//                    }
+//                    case 0x01:
+//                    {
+//                        if (IsMaxTaskIdle())
+//                        {
+//                            float currentTempMeasurement = getThermocoupleAverageTemp();
+//                            //apphmiData.x = 0; //x represents time.
+//                            updateCoordinatesY(currentTempMeasurement);//apphmiData.y = (uint32_t)(1410.0f/29.0f - currentTempMeasurement*47.0f/290.0f); //y represents temperature.
+//                            initializeTaskPID(currentTempMeasurement);//It's just to start the PID
+//                            apphmiData.adelay = RTC_Timer32CounterGet();//Here I use this variable to gradually increase the PID every 500ms
+//                            apphmiData.ramp = (getPreHeatTemp() - currentTempMeasurement)/getPreHeatTime(); // rampa ºC/s
+//                            apphmiData.initialTemperature = currentTempMeasurement;
+//                            apphmiData.doNotRecalculateSetPoint = false;
+//                            apphmiData.elapsed_s = 0.0f;
+//                        }
+//                        else
+//                        {
+//                            return; //If the max is occupied, we prevent the pointer from incrementing.
+//                        }
+//                        break;
+//                    }
+//                    case 0x02: plotTemperatureLine(); break;
+//                    case 0x03:
+//                    {
+//                        displayTemperatureOnScreen();
+//                        if (apphmiData.doNotRecalculateSetPoint)
+//                        {
+//                            apphmiData.doNotRecalculateSetPoint = false;
+//                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
+//                        }
+//                        break;
+//                    }
+//                    case 0x04:
+//                    {
+//                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
+//                        // calcula setpoint deseado en este instante (no pasar de Tmp objetivo (getPreHeatTemp))
+//                        float setpoint = apphmiData.initialTemperature + apphmiData.ramp * apphmiData.elapsed_s; // ramp*0.5s = ºC/s *s = ºC
+//                        if (apphmiData.ramp > 0.0f && setpoint > getPreHeatTemp()) setpoint = getPreHeatTemp();
+//                        if (apphmiData.ramp < 0.0f && setpoint < getPreHeatTemp()) setpoint = getPreHeatTemp();
+//                        // envía la referencia al PID
+//                        setReferenceTaskPID(setpoint);
+//                        // si llegamos al objetivo temporal o de temperatura, salimos
+//                        if (setpoint >= getPreHeatTemp()) 
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            setReferenceTaskPID(getPreHeatTemp());//For safety, we set the preheating temperature; there is a possibility that the setpoint may be slightly higher.
+//                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return;
+//                        }
+//                        if (apphmiData.elapsed_s >= getPreHeatTime())
+//                        {
+//                            apphmiData.typeError = ERROR_COMPLEX_PREHEAT;
+//                            apphmiData.state = APPHMI_STATE_ERROR; //If the preheating temperature is reached, the flux should enter its activation state.
+//                        }
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x05:
+//                    {
+//                       if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+//                       {
+//                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+//                       }
+//                       else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+//                       {
+//                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+//                            apphmiData.doNotRecalculateSetPoint = true;
+//                       }
+//                       else
+//                       {
+//                            return; //If the max is occupied, we prevent the pointer from incrementing.
+//                       }
+//                       break;
+//                    }
+//                    default:
+//                    {
+//                        if (getLastMeasurement() <=  getPreHeatTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_FLUX_ACTIVATION; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return; 
+//                        }
+//                    }
+//                }
+//                apphmiData.messagePointer++;
+//            }
+//            break;
+//        }
+//        case APPHMI_STATE_FLUX_ACTIVATION:
+//        {
+//            if (IsGLCDTaskIdle())
+//            {
+//                switch (apphmiData.messagePointer)
+//                {
+//                    case 0x00:  
+//                    {
+//                        apphmiData.doNotRecalculateSetPoint = false;
+//                        LCDTinyStr(2,1,"Flux Activation",true);   
+//                        if (getFluxTemp() <= getLastMeasurement())
+//                        {
+//                            setReferenceTaskPID(getFluxTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
+//                            apphmiData.messagePointer = 0x05; //so that it goes into default
+//                        }
+//                        buttonPressedSound();
+//                        break;
+//                    }
+//                    case 0x01:
+//                    {
+//                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                        apphmiData.elapsed_s = 0.0f;
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x02: plotTemperatureLine(); break;
+//                    case 0x03:
+//                    {
+//                        displayTemperatureOnScreen();
+//                        if (apphmiData.doNotRecalculateSetPoint)
+//                        {
+//                            apphmiData.doNotRecalculateSetPoint = false;
+//                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
+//                        }
+//                        break;
+//                    }
+//                    case 0x04:
+//                    {
+//                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay))/((float)(_1000ms));
+//                        
 //                        float s = apphmiData.elapsed_s / getFluxTime();
 //                        if (s < 0.0f) s = 0.0f;
 //                        if (s > 1.0f) s = 1.0f;
-//                        // cubic smoothstep: smooth = s^2 * (3 - 2*s)
-//                        //float smooth = s * s * (3.0f - 2.0f * s); //hace una contante un tiempo y sube suavemente, pero no quiero que sea cote
-//                        float a = 0.25f;  // 0.2 a 0.4 suele ir bien
-//                        float smooth = s * (a + (1.0f - a) * s);
 //
-//                        // setpoint suave entre initialTemperature y getFluxTemp()
-//                        float T0 = apphmiData.initialTemperature;
-//                        float T1 = getFluxTemp();
-//                        float setpoint = T0 + (T1 - T0) * smooth;
+//                        // Si quieres fidelidad simple, usa lineal:
+//                        //float setpoint = Tb + (Tc - Tb) * s;
 //
-//                         // protección por si hay pequeñas diferencias numéricas
-//                        if (T1 >= T0 && setpoint > T1) setpoint = T1;
-//                        if (T1 <  T0 && setpoint < T1) setpoint = T1;
-//                        // envía la referencia al PID
+//                        // Si quieres una subida un poco más suave al inicio:
+//                         float eased = 1.0f - powf(1.0f - s, 1.6f);
+//                         float setpoint = getPreHeatTemp() + (getFluxTemp() - getPreHeatTemp()) * eased;
+//
 //                        setReferenceTaskPID(setpoint);
-//                         // condición de término por temperatura alcanzada
-//                        if ((T1 >= T0 && setpoint >= T1) || (T1 < T0 && setpoint <= T1))
+//
+//                        if (s >= 1.0f)
 //                        {
-//                            setReferenceTaskPID(T1); // forzar valor final exacto
+//                            setReferenceTaskPID(getFluxTemp());
 //                            apphmiData.messagePointer = 0x00; 
 //                            apphmiData.state = APPHMI_STATE_REFLOW;
 //                            return;
 //                        }
+//                        
 //                        // condición de término por tiempo excedido (fallo)
-//                        if (apphmiData.elapsed_s > getFluxTime())
+//                         if (apphmiData.elapsed_s > getFluxTime())//if (apphmiData.elapsed_s > getReflowTime())
 //                        {
 //                            apphmiData.typeError = ERROR_FLUX;
 //                            apphmiData.state = APPHMI_STATE_ERROR;
 //                            return;
 //                        }
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x05:
-                    {
-                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
-                        {
-                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
-                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
-                        }
-                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
-                        {
-                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
-                            apphmiData.doNotRecalculateSetPoint = true;
-                        }
-                        else
-                        {
-                            return; // we prevent the pointer from incrementing.
-                        }
-                        break;
-                    }
-                    default:
-                    {
-                        if (getLastMeasurement() <=  getFluxTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_REFLOW; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return; 
-                        }
-                    }
-                }
-                apphmiData.messagePointer++;
-            }
-            break;
-        }
-        case APPHMI_STATE_REFLOW:
-        {
-            if (IsGLCDTaskIdle())
-            {
-                switch (apphmiData.messagePointer)
-                {
-                    case 0x00:  
-                    {
-                        apphmiData.doNotRecalculateSetPoint = false;
-                        LCDTinyStr(2,1,"Reflow         ",true);   
-                        if (getReflowTemp() <= getLastMeasurement())
-                        {
-                            setReferenceTaskPID(getReflowTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
-                            apphmiData.messagePointer = 0x05; //so that it goes into default
-                        }
-                        buttonPressedSound();
-                        break;
-                    }
-                    case 0x01:
-                    {
-                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                        apphmiData.elapsed_s = 0.0f;
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x02: plotTemperatureLine(); break;
-                    case 0x03:
-                    {
-                        displayTemperatureOnScreen();
-                        if (apphmiData.doNotRecalculateSetPoint)
-                        {
-                            apphmiData.doNotRecalculateSetPoint = false;
-                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
-                        }
-                        break;
-                    }
-                    case 0x04:
-                    {
-                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay)) / ((float)(_1000ms));
-                        
-                        float s = apphmiData.elapsed_s / getReflowTime();
-                        if (s < 0.0f) s = 0.0f;
-                        if (s > 1.0f) s = 1.0f;
-
-                        // Si quieres fidelidad simple, usa lineal:
-                        //float setpoint = Tb + (Tc - Tb) * s;
-
-                        // Si quieres una subida un poco más suave al inicio:
-                         float eased = 1.0f - powf(1.0f - s, 1.6f);
-                         float setpoint = getFluxTemp() + (getReflowTemp() - getFluxTemp()) * eased;
-
-                        setReferenceTaskPID(setpoint);
-
-                        if (s >= 1.0f)
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            setReferenceTaskPID(getReflowTemp());
-                            apphmiData.state = APPHMI_STATE_COOLING;
-                            return;
-                        }
-                        
-                        // condición de término por tiempo excedido (fallo)
-                        if (apphmiData.elapsed_s > getReflowTime())
-                        {
-                            apphmiData.typeError = ERROR_REFLOW;
-                            apphmiData.state = APPHMI_STATE_ERROR;
-                            return;
-                        }
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x05:
-                    {
-                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
-                        {
-                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
-                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
-                        }
-                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
-                        {
-                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
-                            apphmiData.doNotRecalculateSetPoint = true;
-                        }
-                        else
-                        {
-                            return; // we prevent the pointer from incrementing.
-                        }
-                        break;
-                    }
-                    default:
-                    {
-                        if (getLastMeasurement() <=  getReflowTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_COOLING; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return; 
-                        }
-                    }
-                }
-                apphmiData.messagePointer++;
-             }
-            break;
-        }
-        case APPHMI_STATE_COOLING:
-        {
-            if (IsGLCDTaskIdle())
-            {
-                switch (apphmiData.messagePointer)
-                {
-                    case 0x00:  
-                    {
-                        apphmiData.doNotRecalculateSetPoint = false;
-                        LCDTinyStr(2,1,"Cooling",true);   
-                        if (getCoolingTemp() >= getLastMeasurement())
-                        {
-                            setReferenceTaskPID(getCoolingTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
-                            apphmiData.messagePointer = 0x05; //so that it goes into default
-                        }
-                        buttonPressedSound();
-                        break;
-                    }
-                    case 0x01:
-                    {
-                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                        apphmiData.elapsed_s = 0.0f;
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x02: plotTemperatureLine(); break;
-                    case 0x03:
-                    {
-                        displayTemperatureOnScreen();
-                        if (apphmiData.doNotRecalculateSetPoint)
-                        {
-                            apphmiData.doNotRecalculateSetPoint = false;
-                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
-                        }
-                        break;
-                    }
-                    case 0x04:
-                    {
-                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay)) / ((float)(_1000ms));
-                        float total_time = getCoolingTime();   // tiempo de C a D
-                        float s = apphmiData.elapsed_s / total_time;
-                        if (s < 0.0f) s = 0.0f;
-                        if (s > 1.0f) s = 1.0f;
-
-                        float Tc = getReflowTemp();  // temperatura al entrar a C
-                        float Td = getCoolingTemp(); // temperatura objetivo en D
-
-                        // Curva lineal descendente
-                        float setpoint = Tc + (Td - Tc) * s;
-
-                        // Protección por si hay redondeos
-                        if (Tc >= Td && setpoint < Td) setpoint = Td;
-                        if (Tc <  Td && setpoint > Td) setpoint = Td;
-
-                        setReferenceTaskPID(setpoint);
-
-                        if (s >= 1.0f)
-                        {
-                            setReferenceTaskPID(Td);
-                            apphmiData.state = APPHMI_STATE_AFTER_COOLING;
-                            return;
-                        }
-                        apphmiData.adelay = RTC_Timer32CounterGet();
-                        break;
-                    }
-                    case 0x05:
-                    {
-                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
-                        {
-                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
-                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
-                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
-                        }
-                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
-                        {
-                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
-                            apphmiData.doNotRecalculateSetPoint = true;
-                        }
-                        else
-                        {
-                            return; // we prevent the pointer from incrementing.
-                        }
-                        break;
-                    }
-                    default:
-                    {
-                        if (getLastMeasurement() <=  getCoolingTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
-                        {
-                            apphmiData.messagePointer = 0x00; 
-                            apphmiData.state = APPHMI_STATE_AFTER_COOLING; //If the preheating temperature is reached, the flux should enter its activation state.
-                            return; 
-                        }
-                    }
-                }
-                apphmiData.messagePointer++;
-            }
-            break;
-        }
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x05:
+//                    {
+//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+//                        {
+//                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
+//                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+//                        }
+//                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+//                        {
+//                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+//                            apphmiData.doNotRecalculateSetPoint = true;
+//                        }
+//                        else
+//                        {
+//                            return; // we prevent the pointer from incrementing.
+//                        }
+//                        break;
+//                    }
+//                    default:
+//                    {
+//                        if (getLastMeasurement() <=  getFluxTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_REFLOW; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return; 
+//                        }
+//                    }
+//                }
+//                apphmiData.messagePointer++;
+//            }
+//            break;
+//        }
+//        case APPHMI_STATE_REFLOW:
+//        {
+//            if (IsGLCDTaskIdle())
+//            {
+//                switch (apphmiData.messagePointer)
+//                {
+//                    case 0x00:  
+//                    {
+//                        apphmiData.doNotRecalculateSetPoint = false;
+//                        LCDTinyStr(2,1,"Reflow         ",true);   
+//                        if (getReflowTemp() <= getLastMeasurement())
+//                        {
+//                            setReferenceTaskPID(getReflowTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
+//                            apphmiData.messagePointer = 0x05; //so that it goes into default
+//                        }
+//                        buttonPressedSound();
+//                        break;
+//                    }
+//                    case 0x01:
+//                    {
+//                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                        apphmiData.elapsed_s = 0.0f;
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x02: plotTemperatureLine(); break;
+//                    case 0x03:
+//                    {
+//                        displayTemperatureOnScreen();
+//                        if (apphmiData.doNotRecalculateSetPoint)
+//                        {
+//                            apphmiData.doNotRecalculateSetPoint = false;
+//                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
+//                        }
+//                        break;
+//                    }
+//                    case 0x04:
+//                    {
+//                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay)) / ((float)(_1000ms));
+//                        
+//                        float s = apphmiData.elapsed_s / getReflowTime();
+//                        if (s < 0.0f) s = 0.0f;
+//                        if (s > 1.0f) s = 1.0f;
+//
+//                        // Si quieres fidelidad simple, usa lineal:
+//                        //float setpoint = Tb + (Tc - Tb) * s;
+//
+//                        // Si quieres una subida un poco más suave al inicio:
+//                         float eased = 1.0f - powf(1.0f - s, 1.6f);
+//                         float setpoint = getFluxTemp() + (getReflowTemp() - getFluxTemp()) * eased;
+//
+//                        setReferenceTaskPID(setpoint);
+//
+//                        if (s >= 1.0f)
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            setReferenceTaskPID(getReflowTemp());
+//                            apphmiData.state = APPHMI_STATE_COOLING;
+//                            return;
+//                        }
+//                        
+//                        // condición de término por tiempo excedido (fallo)
+//                        if (apphmiData.elapsed_s > getReflowTime())
+//                        {
+//                            apphmiData.typeError = ERROR_REFLOW;
+//                            apphmiData.state = APPHMI_STATE_ERROR;
+//                            return;
+//                        }
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x05:
+//                    {
+//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+//                        {
+//                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
+//                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+//                        }
+//                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+//                        {
+//                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+//                            apphmiData.doNotRecalculateSetPoint = true;
+//                        }
+//                        else
+//                        {
+//                            return; // we prevent the pointer from incrementing.
+//                        }
+//                        break;
+//                    }
+//                    default:
+//                    {
+//                        if (getLastMeasurement() <=  getReflowTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_COOLING; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return; 
+//                        }
+//                    }
+//                }
+//                apphmiData.messagePointer++;
+//             }
+//            break;
+//        }
+//        case APPHMI_STATE_COOLING:
+//        {
+//            if (IsGLCDTaskIdle())
+//            {
+//                switch (apphmiData.messagePointer)
+//                {
+//                    case 0x00:  
+//                    {
+//                        apphmiData.doNotRecalculateSetPoint = false;
+//                        LCDTinyStr(2,1,"Cooling",true);   
+//                        if (getCoolingTemp() >= getLastMeasurement())
+//                        {
+//                            setReferenceTaskPID(getCoolingTemp());//It would be a rare case where the oven temperature is above the desired temperature from the start.
+//                            apphmiData.messagePointer = 0x05; //so that it goes into default
+//                        }
+//                        buttonPressedSound();
+//                        break;
+//                    }
+//                    case 0x01:
+//                    {
+//                        //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                        apphmiData.elapsed_s = 0.0f;
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x02: plotTemperatureLine(); break;
+//                    case 0x03:
+//                    {
+//                        displayTemperatureOnScreen();
+//                        if (apphmiData.doNotRecalculateSetPoint)
+//                        {
+//                            apphmiData.doNotRecalculateSetPoint = false;
+//                            apphmiData.messagePointer = 0x04; //to skip the set point calculation
+//                        }
+//                        break;
+//                    }
+//                    case 0x04:
+//                    {
+//                        apphmiData.elapsed_s += (float)(abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay)) / ((float)(_1000ms));
+//                        float total_time = getCoolingTime();   // tiempo de C a D
+//                        float s = apphmiData.elapsed_s / total_time;
+//                        if (s < 0.0f) s = 0.0f;
+//                        if (s > 1.0f) s = 1.0f;
+//
+//                        float Tc = getReflowTemp();  // temperatura al entrar a C
+//                        float Td = getCoolingTemp(); // temperatura objetivo en D
+//
+//                        // Curva lineal descendente
+//                        float setpoint = Tc + (Td - Tc) * s;
+//
+//                        // Protección por si hay redondeos
+//                        if (Tc >= Td && setpoint < Td) setpoint = Td;
+//                        if (Tc <  Td && setpoint > Td) setpoint = Td;
+//
+//                        setReferenceTaskPID(setpoint);
+//
+//                        if (s >= 1.0f)
+//                        {
+//                            setReferenceTaskPID(Td);
+//                            apphmiData.state = APPHMI_STATE_AFTER_COOLING;
+//                            return;
+//                        }
+//                        apphmiData.adelay = RTC_Timer32CounterGet();
+//                        break;
+//                    }
+//                    case 0x05:
+//                    {
+//                        if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelay) > _500ms)
+//                        {
+//                           //apphmiData.initialTemperature = getThermocoupleAverageTemp();
+//                           //adelay should not be updated because it is cumulative elapsed_s --- apphmiData.adelay = RTC_Timer32CounterGet();
+//                           apphmiData.messagePointer = 0x03; //so that it returns to calibrate the setpoint
+//                        }
+//                        else if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.adelayGraph) > apphmiData.stepsOfTheTotalProcessingTime)
+//                        {
+//                            apphmiData.messagePointer = 0x01; //so that it returns to graphing the temp
+//                            apphmiData.doNotRecalculateSetPoint = true;
+//                        }
+//                        else
+//                        {
+//                            return; // we prevent the pointer from incrementing.
+//                        }
+//                        break;
+//                    }
+//                    default:
+//                    {
+//                        if (getLastMeasurement() <=  getCoolingTemp())//Wait until the temperature drops to preHeat, this doesn't make much sense.
+//                        {
+//                            apphmiData.messagePointer = 0x00; 
+//                            apphmiData.state = APPHMI_STATE_AFTER_COOLING; //If the preheating temperature is reached, the flux should enter its activation state.
+//                            return; 
+//                        }
+//                    }
+//                }
+//                apphmiData.messagePointer++;
+//            }
+//            break;
+//        }
         case APPHMI_STATE_AFTER_COOLING:
         {
+            SSR_Clear();
             LED_Set();
             break;
         }
@@ -1524,7 +1722,7 @@ void APPHMI_Tasks ( void )
                     }
                     case 0x02:
                     {
-                        if (apphmiData.typeError >= ERROR_SIMPLE_PREHEAT && ERROR_REFLOW <= apphmiData.typeError)
+                        if (apphmiData.typeError >= ERROR_SIMPLE_PREHEAT && apphmiData.typeError <= ERROR_REFLOW)
                         {
                             LCDStr(0x02,(unsigned char *)"Temp wasn't reached in time",false, true);    break;
                         }
