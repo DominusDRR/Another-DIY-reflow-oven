@@ -104,7 +104,8 @@ typedef enum
     APPHMI_STATE_START_PREHEATING_PROCESS,        
     APPHMI_STATE_FLUX_ACTIVATION,
     APPHMI_STATE_REFLOW,   
-    APPHMI_STATE_COOLING,        
+    APPHMI_STATE_COOLING,
+    APPHMI_STATE_PROFILE_PHASE,
     APPHMI_STATE_ERROR,
     APPHMI_STATE_AFTER_COOLING,        
     APPHMI_STATE_SHOW_ERROR        
@@ -148,11 +149,18 @@ typedef struct
     uint32_t estimatedTimeProcessWouldTake;
     uint32_t timeProcessTakes;
     uint8_t typeError;
-    float initialTemperature;
+    //float initialTemperature;
     float ramp;
     float elapsed_s;
     uint32_t adelayGraph; //If two delays are needed, one for processing and one for graphing, the latter is used for the graphs.
     bool doNotRecalculateSetPoint;
+    //Variables for profile
+    const char *dataPtr;
+    float temperatureToReach;
+    uint8_t typeProfile;
+    APPHMI_STATES nextState; 
+    float timeToReach; 
+    float initialTemperature;
 } APPHMI_DATA;
 
 // *****************************************************************************
