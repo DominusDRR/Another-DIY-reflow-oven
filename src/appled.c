@@ -67,11 +67,36 @@ extern uint32_t abs_diff_uint32(uint32_t a, uint32_t b);
 // Section: Application Local Functions
 // *****************************************************************************
 // *****************************************************************************
-
+void changeLEDFlashingSpeed (bool fast);
+void startStopLEDFlashing(bool start);
 
 /* TODO:  Add any necessary local functions.
 */
+void changeLEDFlashingSpeed (bool fast)
+{
+    if (fast)
+    {
+        appledData.time = _100ms;
+    }
+    else
+    {
+        appledData.time = _500ms;
+    }
+}
 
+void startStopLEDFlashing(bool start)
+{
+    if (start)
+    {
+        changeLEDFlashingSpeed(false); 
+        appledData.state = APPLED_STATE_INIT;
+    }
+    else
+    {
+        LED_Set();
+        appledData.state = APPLED_LED_IDLE;
+    }
+}
 
 // *****************************************************************************
 // *****************************************************************************
@@ -116,12 +141,13 @@ void APPLED_Tasks ( void )
         case APPLED_STATE_INIT:
         {
             appledData.adelay = RTC_Timer32CounterGet();
+            appledData.time = _500ms; //By default, the LED flashes at 500ms
             appledData.state = APPLED_LED_STATUS_BLINKING;
             break;
         }
         case APPLED_LED_STATUS_BLINKING:
         {
-            if ( abs_diff_uint32(RTC_Timer32CounterGet(), appledData.adelay) > _500ms)
+            if ( abs_diff_uint32(RTC_Timer32CounterGet(), appledData.adelay) > appledData.time)
             {
                 appledData.adelay = RTC_Timer32CounterGet();
                 LED_Toggle();
@@ -129,6 +155,7 @@ void APPLED_Tasks ( void )
             break;
         }
         /* TODO: implement your application state machine.*/
+        case APPLED_LED_IDLE: break;
         /* The default state should never be executed. */
         default: break; /* TODO: Handle error in application's state machine. */
     }
