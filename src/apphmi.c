@@ -155,6 +155,8 @@ extern float getReflowTemp(void);
 extern float getCoolingTime(void);
 extern float getCoolingTemp(void);
 extern void buttonPressedSound(void);
+extern void changeLEDFlashingSpeed (bool fast);
+extern void startStopLEDFlashing(bool start);
 //bool IsONFFTaskIdle(void);
 //void initializeTaskONOFF(void);
 //float getLastMeasurementONOFF(void);
@@ -316,6 +318,11 @@ void executeProfilePhase(void)
                     {
                         apphmiData.messagePointer = 0x00; 
                         apphmiData.state = apphmiData.nextState; //If the preheating temperature is reached, the flux should enter its activation state.
+                        if (APPHMI_STATE_AFTER_COOLING == apphmiData.nextState)
+                        {
+                            startStopLEDFlashing(false);
+                            stopTaskPID(); //turn off SSR for safety
+                        }
                         return;
                     }
                     if ( abs_diff_uint32(RTC_Timer32CounterGet(), apphmiData.timeProcessTakes) > apphmiData.estimatedTimeProcessWouldTake)
@@ -1181,6 +1188,7 @@ void APPHMI_Tasks ( void )
                             float time_pred = predictTimeForT(getPreHeatTemp()); //I get the time for that given temperature
                             apphmiData.timeProcessTakes = RTC_Timer32CounterGet();
                             apphmiData.x = 0; //x represents time.
+                            changeLEDFlashingSpeed(true); //The LED starts blinking faster 
                             if (getPreHeatTime() < time_pred - TOLERANCIA_SEC)         
                             {        
                                 initializeTaskPID(getPreHeatTemp());
@@ -1690,8 +1698,15 @@ void APPHMI_Tasks ( void )
 //        }
         case APPHMI_STATE_AFTER_COOLING:
         {
-            SSR_Clear();
-            LED_Set();
+            if (IsGLCDTaskIdle())
+            {
+                displayTemperatureOnScreen();
+                if (getLastMeasurement() < 35.0)
+                {
+                    buttonPressedSound(); //I wait until 35ºC to return to the initial menu
+                    returnHomeMenu();
+                }
+            }
             break;
         }
         case APPHMI_STATE_ERROR:
@@ -1732,6 +1747,7 @@ void APPHMI_Tasks ( void )
                     {
                         if (ESC_BUTTON_PRESSED == getPressedBtn())
                         {
+                            changeLEDFlashingSpeed(false);
                             returnHomeMenu();
                         }
                         return; //so that the pointer doesn't increase
