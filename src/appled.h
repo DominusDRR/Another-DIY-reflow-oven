@@ -64,7 +64,7 @@ typedef enum
     APPLED_STATE_INIT=0,
     APPLED_LED_STATUS_BLINKING,
     /* TODO: Define states used by the application state machine. */
-
+    APPLED_LED_IDLE
 } APPLED_STATES;
 
 
@@ -87,6 +87,7 @@ typedef struct
     APPLED_STATES state;
     /* TODO: Define any additional data used by the application. */
     uint32_t adelay;
+    uint32_t time;
 } APPLED_DATA;
 
 // *****************************************************************************
