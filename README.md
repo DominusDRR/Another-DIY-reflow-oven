@@ -11,4 +11,4 @@ This repository contains information about the project I've named Another DIY Re
 
 ## [e. Information that must be backed up in non-volatile memory](InformationBackup.md)
 
-[![Reflow Oven User Menu: Setup Guide](https://youtube.com)](https://www.youtube.com/watch?v=BwE15Ofty98)
+[![Reflow Oven User Menu: Setup Guide](https://img.youtube.com/vi/BwE15Ofty98/0.jpg)](https://www.youtube.com/watch?v=BwE15Ofty98)
